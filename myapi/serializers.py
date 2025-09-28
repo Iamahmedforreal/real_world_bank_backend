@@ -7,13 +7,13 @@ from django.contrib.auth import authenticate
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True , min_length=8)
     password_confirm = serializers.CharField(write_only=True )
-    phone = serializers.CharField(max_length=15 , unique=True)
-    first_name = serializers.CharField(max_length=30 , wite_only=True)
+    phone_number = serializers.CharField(max_length=15  ,  required=True )
+    first_name = serializers.CharField(max_length=30 , write_only=True)
     last_name = serializers.CharField(max_length=30 , write_only=True)
 
     class Meta:
         model = User
-        fields = ['username', 'email', 'password', 'password_confirm', 'first_name', 'last_name' , 'phone']
+        fields = ['username', 'email', 'password', 'password_confirm', 'first_name', 'last_name' , 'phone_number']
 
     def validate(self, data):
        if data['password'] != data['password_confirm']:
@@ -27,7 +27,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         validated_data.pop('password_confirm')
-        phone = validated_data.pop('phone')
+        phone = validated_data.pop('phone_number')
 
         with transaction.atomic():
             user = User.objects.create_user(**validated_data)
