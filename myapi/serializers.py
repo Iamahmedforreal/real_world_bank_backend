@@ -55,6 +55,72 @@ class loginSerializer(serializers.Serializer):
         
         else:
             raise serializers.ValidationError("Both username and password are required.")
+        
+
+class transctionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Transaction
+        fields  = ['from_account', 'to_account', 'transaction_type', 'status']
+        read_only_fields = ['status']
+
+    def validate(self, data):
+        from_account = data.get('from_account')
+        to_account = data.get('to_account')
+        amount = data.get('amount')
+
+        if amount <= 0:
+            raise serializers.ValidationError("Amount must be positive.")
+
+        if from_account:
+            """check if from_account is active"""
+            if from_account.status != 'active':
+                raise serializers.ValidationError("From account is not active.")
+            
+            """check if user who sending money is the owner of the account"""
+            user = self.context['request'].user
+            if from_account.customer.user != user:
+                raise serializers.ValidationError("You do not own this account the from account.")
+            
+        if not to_account:
+            raise serializers.ValidationError("To account must be specified.")
+
+       
+        
+        return data
+    
+    def create(self, validated_data):
+        from_account = validated_data.get('from_account')
+        to_account = validated_data.get('to_account')
+        amount = validated_data.get('amount')  
+
+        with transaction.atomic():
+            account = {}
+            if from_account:
+                account['from_account'] = Account.objects.select_for_update().get(id=from_account.id)
+            if to_account:
+                account['to_account'] = Account.objects.select_for_update().get(id=to_account.id)
+
+            if from_account:
+                if account['from_account'].balance < amount:
+                    raise serializers.ValidationError("Insufficient funds in the from account.")
+                user = self.context['request'].user
+                if account['from_account'].customer.user != user:
+                    raise serializers.ValidationError("You do not own the from account.")
+                account['from_account'].balance -= amount
+                account['from_account'].save()
+            if to_account:
+                account['to_account'].balance += amount
+                account['to_account'].save()
+            
+            validated_data['status'] = (
+                "transfer" if from_account and to_account else
+                "deposit" if to_account else
+                "withdrawal"
+            )
+                
+            transaction_instance = Transaction.objects.create(**validated_data , satatus = "completed")
+            return transaction_instance
+                
             
         
-        
+   
