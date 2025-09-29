@@ -1,4 +1,4 @@
-from django import permissions
+from rest_framework import permissions as permissions
 
 class IsUthenticated(permissions.BasePermission):
 
@@ -17,7 +17,7 @@ class IsOwnerOrReadOnly(permissions.BasePermission):
         return obj.user == request.user
     
 
-class transactionPermission(permissions.BasePermission):
+class TransactionPermission(permissions.BasePermission):
     """Custom permission to only allow owners of a transaction to view it."""
     def has_object_permission(self, request, view, obj):
         if request.user.is_staff:

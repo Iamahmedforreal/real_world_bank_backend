@@ -4,6 +4,7 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.contrib.auth import authenticate
 
+
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True , min_length=8)
     password_confirm = serializers.CharField(write_only=True )
@@ -21,7 +22,7 @@ class RegisterSerializer(serializers.ModelSerializer):
        return data
     
     def validate_phone(self, value):
-        if Customer.objects.filter(phone =value).exists():
+        if Customer.objects.filter(phone_number =value).exists():
             raise serializers.ValidationError("Phone number already in use.")
         return value
     
@@ -56,71 +57,100 @@ class loginSerializer(serializers.Serializer):
         else:
             raise serializers.ValidationError("Both username and password are required.")
         
+from django.db import transaction
+from rest_framework import serializers
 
-class transctionSerializer(serializers.ModelSerializer):
+# Assuming Account and Transaction models are correctly imported
+# from .models import Account, Transaction 
+from rest_framework import serializers
+from django.db import transaction
+# Assuming Account and Transaction models are available in the scope
+# from .models import Account, Transaction 
+
+class TransctionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
-        fields  = ['from_account', 'to_account', 'transaction_type', 'status']
-        read_only_fields = ['status']
-
+        fields  = ['from_account', 'to_account', 'transaction_type', 'amount', ]
+        read_only_fields = ['transaction_type'] # Set type as read-only, calculated in create/save
+    
     def validate(self, data):
-        from_account = data.get('from_account')
-        to_account = data.get('to_account')
+        from_account_id  = data.get('from_account')
+        to_account_id = data.get('to_account')
         amount = data.get('amount')
 
-        if amount <= 0:
-            raise serializers.ValidationError("Amount must be positive.")
+        if not from_account_id and not to_account_id:
+            raise serializers.ValidationError("Either from_account or to_account must be provided.")
 
+        if from_account_id:
+            try:
+                from_account = Account.objects.get(id=from_account_id)
+            except Account.DoesNotExist:
+                raise serializers.ValidationError({'from_account': "From account not found."})
+            data['from_account'] = from_account
+        else:
+            from_account = None
+
+        if to_account_id:
+            try:
+                to_account = Account.objects.get(id=to_account_id)
+            except Account.DoesNotExist:
+                raise serializers.ValidationError({'to_account': "To account not found."})
+            data['to_account'] = to_account
+        else:
+            to_account = None
+
+
+        """we checking if the amount is greater than zero"""
+        if amount <= 0:
+            raise serializers.ValidationError("Amount must be greater than zero.")
+    
+
+        """ We are checking if both accounts are active"""        
+        if from_account and from_account.status != 'active':
+            raise serializers.ValidationError("From account must be active to perform a transaction.")
+        if to_account and to_account.status != 'active':
+            raise serializers.ValidationError("To account must be active to perform a transaction.")
+      
+        """ We are checking if user is trying to send money from his own account"""
         if from_account:
-            """check if from_account is active"""
-            if from_account.status != 'active':
-                raise serializers.ValidationError("From account is not active.")
-            
-            """check if user who sending money is the owner of the account"""
             user = self.context['request'].user
             if from_account.customer.user != user:
-                raise serializers.ValidationError("You do not own this account the from account.")
-            
-        if not to_account:
-            raise serializers.ValidationError("To account must be specified.")
+                raise serializers.ValidationError("You can only send money from your own account.")
+        """"" We are checking if user is trying to send money to his own account"""
 
-       
-        
         return data
     
     def create(self, validated_data):
-        from_account = validated_data.get('from_account')
-        to_account = validated_data.get('to_account')
-        amount = validated_data.get('amount')  
+      from_account = validated_data.get('from_account')
+      to_account = validated_data.get('to_account')
+      amount = validated_data.get('amount')
 
-        with transaction.atomic():
-            account = {}
-            if from_account:
-                account['from_account'] = Account.objects.select_for_update().get(id=from_account.id)
-            if to_account:
-                account['to_account'] = Account.objects.select_for_update().get(id=to_account.id)
+    # Handle transfer
+      if from_account and to_account:
+        if from_account.balance < amount:
+            raise serializers.ValidationError("Insufficient funds.")
+        from_account.balance -= amount
+        to_account.balance += amount
+        from_account.save()
+        to_account.save()
+        validated_data['transaction_type'] = 'transfer'
 
-            if from_account:
-                if account['from_account'].balance < amount:
-                    raise serializers.ValidationError("Insufficient funds in the from account.")
-                user = self.context['request'].user
-                if account['from_account'].customer.user != user:
-                    raise serializers.ValidationError("You do not own the from account.")
-                account['from_account'].balance -= amount
-                account['from_account'].save()
-            if to_account:
-                account['to_account'].balance += amount
-                account['to_account'].save()
+    # Handle deposit
+      elif to_account:
+        to_account.balance += amount
+        to_account.save()
+        validated_data['transaction_type'] = 'deposit'
+
+    # Handle withdrawal
+      elif from_account:
+        if from_account.balance < amount:
+            raise serializers.ValidationError("Insufficient funds.")
+        from_account.balance -= amount
+        from_account.save()
+        validated_data['transaction_type'] = 'withdrawal'
+
+      return Transaction.objects.create(**validated_data)
+
             
-            validated_data['status'] = (
-                "transfer" if from_account and to_account else
-                "deposit" if to_account else
-                "withdrawal"
-            )
-                
-            transaction_instance = Transaction.objects.create(**validated_data , satatus = "completed")
-            return transaction_instance
-                
-            
+
         
-   
