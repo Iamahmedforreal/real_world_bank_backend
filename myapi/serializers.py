@@ -33,6 +33,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         with transaction.atomic():
             user = User.objects.create_user(**validated_data)
             Customer.objects.create(user=user, phone_number=phone)
+            Account.objects.create(customer=user.customer, account_number=f"ACC{user.id:06d}", account_type='savings', balance=0.00)
 
         return user
     
@@ -68,63 +69,36 @@ from django.db import transaction
 # from .models import Account, Transaction 
 
 class TransctionSerializer(serializers.ModelSerializer):
+    from_account = serializers.PrimaryKeyRelatedField(queryset=Account.objects.all(), allow_null=True, required=False)
+    to_account = serializers.PrimaryKeyRelatedField(queryset=Account.objects.all(), allow_null=True, required=False)
+
     class Meta:
         model = Transaction
         fields  = ['from_account', 'to_account', 'transaction_type', 'amount', ]
         read_only_fields = ['transaction_type'] # Set type as read-only, calculated in create/save
     
     def validate(self, data):
-        from_account_id  = data.get('from_account')
-        to_account_id = data.get('to_account')
-        amount = data.get('amount')
+        from_account = data.get("from_account")
+        to_account = data.get("to_account")
+        amount = data.get("amount")
 
-        if not from_account_id and not to_account_id:
-            raise serializers.ValidationError("Either from_account or to_account must be provided.")
+        # If sending money, check balance
+        if from_account and amount:
+            if from_account.balance < amount:
+                raise serializers.ValidationError("Insufficient funds in the sender's account.")
 
-        if from_account_id:
-            try:
-                from_account = Account.objects.get(id=from_account_id)
-            except Account.DoesNotExist:
-                raise serializers.ValidationError({'from_account': "From account not found."})
-            data['from_account'] = from_account
-        else:
-            from_account = None
-
-        if to_account_id:
-            try:
-                to_account = Account.objects.get(id=to_account_id)
-            except Account.DoesNotExist:
-                raise serializers.ValidationError({'to_account': "To account not found."})
-            data['to_account'] = to_account
-        else:
-            to_account = None
-
-
-        """we checking if the amount is greater than zero"""
-        if amount <= 0:
-            raise serializers.ValidationError("Amount must be greater than zero.")
-    
-
-        """ We are checking if both accounts are active"""        
-        if from_account and from_account.status != 'active':
-            raise serializers.ValidationError("From account must be active to perform a transaction.")
-        if to_account and to_account.status != 'active':
-            raise serializers.ValidationError("To account must be active to perform a transaction.")
-      
-        """ We are checking if user is trying to send money from his own account"""
-        if from_account:
-            user = self.context['request'].user
-            if from_account.customer.user != user:
-                raise serializers.ValidationError("You can only send money from your own account.")
-        """"" We are checking if user is trying to send money to his own account"""
+        # Prevent sending to self
+        if from_account and to_account and from_account == to_account:
+            raise serializers.ValidationError("Sender and receiver accounts must be different.")
 
         return data
+
     
     def create(self, validated_data):
       from_account = validated_data.get('from_account')
       to_account = validated_data.get('to_account')
       amount = validated_data.get('amount')
-
+ 
     # Handle transfer
       if from_account and to_account:
         if from_account.balance < amount:
