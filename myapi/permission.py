@@ -57,4 +57,10 @@ class IsLoanOwnerOrStaff(permissions.BasePermission):
         if request.user.is_staff:
             return True
         return obj.customer.user == request.user
+    
+class IsCardOwnerOrStaff(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        if request.user.is_staff:
+            return True
+        return obj.customer.user == request.user
 
